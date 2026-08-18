@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+.venv
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Data
+data/raw/
+data/processed/
+*.csv
+*.xlsx
+*.parquet
+
+# Models
+*.pth
+*.pt
+*.h5
+*.pkl
+*.joblib
+
+# Results
+results/*.png
+results/*.pdf
+results/*.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Project specific
+project_results.json
