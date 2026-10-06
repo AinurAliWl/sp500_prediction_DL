@@ -1,9 +1,10 @@
-torch
-pandas
 numpy
+pandas
+torch
+scikit-learn
+joblib
 matplotlib
 seaborn
-scikit-learn
 jupyter
-tqdm
 pandas-datareader
+tqdm

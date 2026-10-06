@@ -6,16 +6,18 @@ __pycache__/
 .Python
 env/
 venv/
-.env
-.venv
+.venv/
 *.egg-info/
 dist/
 build/
 
-# Jupyter Notebooks
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Jupyter
 .ipynb_checkpoints/
-*.ipynb_checkpoints
-*/.ipynb_checkpoints/*
 
 # Data
 data/raw/
@@ -24,29 +26,37 @@ data/processed/
 *.xlsx
 *.parquet
 
-# Models
+# Keep the corrected dataset in Git
+!data/fred_economic_data.csv
+
+# Model artifacts
+models/
 *.pth
 *.pt
 *.h5
 *.pkl
 *.joblib
 
+# MLflow
+mlruns/
+mlartifacts/
+mlflow.db
+
 # Results
 results/*.png
 results/*.pdf
 results/*.html
+project_results.json
 
-# IDE
+# IDE and OS
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
 # Logs
 logs/
 *.log
-
-# Project specific
-project_results.json
