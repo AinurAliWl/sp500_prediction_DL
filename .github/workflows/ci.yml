@@ -39,3 +39,40 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      - name: Create untrained CI model bundle
+        run: python scripts/create_ci_bundle.py
+
+      - name: Build Docker image
+        run: docker build -t sp500-api:ci .
+
+      - name: Check both models in Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          for model in lstm transformer; do
+            docker run -d --name sp500-api-ci -p 127.0.0.1:8000:8000 -e SP500_MODEL="$model" sp500-api:ci
+            python scripts/check_ci_api.py --model "$model"
+            healthy=false
+            for attempt in $(seq 1 30); do
+              status=$(docker inspect --format '{{.State.Health.Status}}' sp500-api-ci)
+              if [ "$status" = "healthy" ]; then
+                healthy=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$healthy" != true ]; then
+              docker logs sp500-api-ci
+              exit 1
+            fi
+            docker rm -f sp500-api-ci
+          done
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs sp500-api-ci || true
+
+      - name: Remove CI container
+        if: always()
+        run: docker rm -f sp500-api-ci || true

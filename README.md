@@ -17,7 +17,8 @@ The goal is to build a reproducible workflow from historical market data to a ru
 | FastAPI inference service                     | Implemented and verified                                      |
 | Automated tests                               | 29 passed                                                     |
 | Docker serving                                | Implemented; healthy container and HTTP 200 forecast verified |
-| GitHub Actions                                | Test workflow configured; first GitHub run pending            |
+| GitHub Actions tests                          | Implemented and verified                                      |
+| Docker checks in CI                           | Prepared; extended run not yet verified                       |
 
 ## Forecasting Task
 
@@ -276,10 +277,36 @@ Tests cover both model architectures, artifact serialization and loading, scalin
 
 They use temporary untrained models and deterministic synthetic data. They do not require downloads, trained production artifacts, or running API and MLflow servers. They verify software behavior; forecasting quality is assessed separately against the baseline.
 
+## Continuous Integration
+
+The workflow is defined in `.github/workflows/ci.yml` and runs on pushes and pull requests to `main`. It can also be started manually from the GitHub Actions page.
+
+The original automated test workflow completed successfully. The extended workflow adds Docker checks; its first successful GitHub run has not yet been confirmed.
+
+### What the Extended Workflow Checks
+
+1. Install Python 3.13, CPU PyTorch, serving dependencies, and test dependencies.
+2. Check dependency compatibility and run the pytest suite.
+3. Create deterministic, untrained model weights and scalers in the temporary CI environment.
+4. Build the Docker image using that temporary inference bundle.
+5. Start the container with LSTM, then Transformer.
+6. Check `/health`, HTTP 200 from `/predict`, five finite forecasts, return compounding, and Docker health status.
+7. Remove the container and show its logs if a check fails.
+
+CI uses `scripts/create_ci_bundle.py` and `scripts/check_ci_api.py`. Temporary models check container behavior, not forecasting accuracy. The workflow does not train on FRED, use the local MLflow database, publish the image, or deploy the API.
+
+**Do not run the CI bundle generator in your local trained-artifact directory.** It refuses to overwrite a nonempty directory. Your existing trained models remain the bundle used for local Docker serving.
+
+After pushing the workflow and scripts, open [GitHub Actions](https://github.com/AinurAliWl/sp500_prediction_DL/actions), select the latest **Python tests** run, and inspect **Build Docker image** and **Check both models in Docker**. Mark Docker CI as verified only after those steps complete successfully.
+
 ## Repository Structure
 
 ```text
 sp500_prediction_DL/
+├── .github/workflows/ci.yml    # Automated tests and Docker checks
+├── scripts/
+│   ├── create_ci_bundle.py    # Untrained models for CI only
+│   └── check_ci_api.py        # HTTP checks for container inference
 ├── api/                       # FastAPI service and example generator
 ├── src/                       # Data, features, models, training and inference
 ├── tests/                     # API and preprocessing tests
@@ -302,7 +329,9 @@ A complete local training directory additionally contains `history.json`, `test_
 
 ## Next Steps and Limitations
 
-A GitHub Actions workflow is configured to run automated tests on pushes and pull requests to main. Its first GitHub run is pending verification. Automated Docker build checks and deployment are not configured yet.
+Automated tests have passed in GitHub Actions. Docker build and container checks are included in the prepared extended workflow; verification of its GitHub run is pending. Automated deployment is not configured.
+
+The next engineering step is to confirm the extended workflow passes and keep its result visible in GitHub Actions. Model research and deployment can then be pursued separately.
 
 Further model evaluation should include multiple seeds and walk-forward validation. The current improvement over persistence is small, overlapping forecast errors are not independent, and high R² on index levels does not establish strong predictive performance.
 
