@@ -1,0 +1,18 @@
+# Only send serving code, dependencies, and the current inference bundle.
+**
+!Dockerfile
+!.dockerignore
+!requirements-api.txt
+!src/
+!src/**
+!api/
+!api/**
+!models/
+!models/returns_mlflow_v1/
+!models/returns_mlflow_v1/lstm.pt
+!models/returns_mlflow_v1/transformer.pt
+!models/returns_mlflow_v1/feature_scaler.joblib
+!models/returns_mlflow_v1/target_scaler.joblib
+!models/returns_mlflow_v1/config.json
+**/__pycache__/
+**/*.pyc

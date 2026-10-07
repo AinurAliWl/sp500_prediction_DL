@@ -1,91 +1,70 @@
+# S&P 500 Forecasting with LSTM, Transformer and MLOps
 
-# S&P 500 Forecasting — LSTM, Transformer & MLOps
+A PyTorch forecasting project with experiment tracking, an HTTP inference API, automated tests, and Docker serving.
 
-A modular PyTorch project that forecasts the S&P 500 over five future trading observations using market and macroeconomic data from FRED.
+The goal is to build a reproducible workflow from historical market data to a running forecast service, while comparing neural models against a simple persistence baseline.
 
-The project compares LSTM and Transformer models against a persistence baseline. Experiment tracking with MLflow, model serving with FastAPI, and automated checks with pytest are implemented. The next goal is to add containerization and continuous integration.
+## Project Status
 
-## Current Status
+| Component                                     | Status                                                        |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| FRED data preparation and feature engineering | Implemented                                                   |
+| Chronological splits and train-only scaling   | Implemented                                                   |
+| LSTM and Transformer training                 | Implemented                                                   |
+| Validation-based model selection              | Implemented                                                   |
+| Overall and per-horizon baseline evaluation   | Implemented                                                   |
+| MLflow experiment tracking                    | Implemented and verified                                      |
+| FastAPI inference service                     | Implemented and verified                                      |
+| Automated tests                               | 29 passed                                                     |
+| Docker serving                                | Implemented; healthy container and HTTP 200 forecast verified |
+| GitHub Actions                                | Test workflow configured; first GitHub run pending            |
 
-Implemented:
+## Forecasting Task
 
-- FRED data download and chronological preprocessing.
-- Feature engineering and train-only fitting of scalers.
-- Chronological train, validation, and test partitions.
-- LSTM and Transformer training with early stopping and best-weight restoration.
-- Validation-based model selection.
-- Overall and per-horizon evaluation against a Naive baseline.
-- Saving and loading model weights, scalers, and configuration.
-- Command-line inference from saved artifacts.
-- MLflow tracking of training parameters, per-epoch losses, and best validation results.
-- Logging model weights, scalers, configuration, and training history as MLflow artifacts.
-- Logging overall and per-horizon test metrics, Naive baseline metrics, and evaluation tables to the corresponding training runs.
-- FastAPI endpoints for health checks, input metadata, and five-horizon forecasts.
-- Input validation and loading the selected model once at startup.
-- Automated tests for both architectures, API inference, invalid inputs, chronological partitions, and scalers.
+Each model receives **60 historical observations with 19 engineered features** and predicts **five future simple returns**. The returns are compounded from the last observed S&P 500 value to produce index forecasts.
 
-Docker and GitHub Actions are planned and are not implemented yet.
+The Naive baseline repeats the last observed index value at all five horizons. Horizons correspond to retained trading observations, not calendar days.
 
-## How It Works
+The bundled data ends on **December 29, 2023**. Example forecasts describe that historical snapshot; starting the API or Docker container does not update the data.
 
-```text
-FRED data → engineered features → chronological split → scaling
-          → LSTM / Transformer → five returns → index forecasts
-```
+## Data
 
-Each model receives 60 historical observations with 19 engineered features and predicts five future daily returns in one forward pass. The returns are compounded from the last observed index value to reconstruct the forecast.
+The corrected dataset contains **1,509 observations**, covering **January 2, 2018 through December 29, 2023**, with six FRED series:
 
-The Naive baseline predicts the last observed index value at every horizon, equivalent to predicting zero returns. Horizons refer to retained trading observations, rather than calendar days.
+| Series     | Description            |
+| ---------- | ---------------------- |
+| SP500      | S&P 500 index          |
+| NASDAQCOM  | NASDAQ Composite index |
+| DGS10      | 10-year Treasury yield |
+| UNRATE     | Unemployment rate      |
+| CPIAUCSL   | Consumer Price Index   |
+| DCOILWTICO | WTI crude oil price    |
 
-## Data and Preprocessing
+The downloader sorts dates, forward-fills indicator values, retains dates with an observed S&P 500 value, and removes remaining incomplete rows. It does not backfill from future observations.
 
-The current corrected snapshot contains **1,509 observations**, from **January 2, 2018 to December 29, 2023**.
+Features include percentage changes, moving-average ratios, rolling volatility, momentum, and changes in Treasury yields and oil prices. Rows without sufficient feature history are removed.
 
-| Indicator      | Description            |
-| -------------- | ---------------------- |
-| `SP500`      | S&P 500 index          |
-| `NASDAQCOM`  | NASDAQ Composite index |
-| `DGS10`      | 10-year Treasury yield |
-| `UNRATE`     | Unemployment rate      |
-| `CPIAUCSL`   | Consumer Price Index   |
-| `DCOILWTICO` | WTI crude oil price    |
-
-Dates are sorted before forward-filling missing indicator values. Only dates with an observed S&P 500 value are retained, and remaining incomplete rows are removed. The downloader does not backfill from future observations.
-
-The 19 engineered features include indicator percentage changes, S&P 500 moving-average ratios, rolling return volatility, S&P 500 and NASDAQ momentum, and five-observation changes in Treasury yields and oil prices. Initial rows without sufficient rolling history are removed.
-
-The feature table is partitioned chronologically at approximately 70% / 15% / 15%. Each target window stays within its partition; input windows may use earlier historical context. Feature and target scalers are fitted on training data only.
+Chronological partitions use approximately 70% training, 15% validation, and 15% testing. Target windows remain entirely within their assigned partition; input windows may use earlier historical context. Both scalers are fitted on training data only.
 
 | Partition  | Input shape       |
 | ---------- | ----------------- |
-| Train      | `(950, 60, 19)` |
+| Training   | `(950, 60, 19)` |
 | Validation | `(213, 60, 19)` |
-| Test       | `(214, 60, 19)` |
+| Testing    | `(214, 60, 19)` |
 
-These sizes describe the current snapshot and default settings.
+## Models
 
-## Models and Training
+| Setting                 | LSTM             | Transformer        |
+| ----------------------- | ---------------- | ------------------ |
+| Layers                  | 2                | 2 encoder layers   |
+| Hidden dimension        | 64               | 64                 |
+| Attention heads         | —               | 4                  |
+| Sequence representation | Last LSTM output | Last encoder token |
+| Position encoding       | —               | Learned embeddings |
+| Dropout                 | 0.2              | 0.2                |
+| Output                  | Five returns     | Five returns       |
 
-| Setting                   | LSTM                        | Transformer                 |
-| ------------------------- | --------------------------- | --------------------------- |
-| Architecture              | 2-layer unidirectional LSTM | 2-layer Transformer encoder |
-| Hidden dimension          | 64                          | 64                          |
-| Attention heads           | —                          | 4                           |
-| Sequence representation   | Last LSTM output            | Last encoder token          |
-| Positional representation | —                          | Learned embeddings          |
-| Output                    | 5 returns                   | 5 returns                   |
-| Dropout                   | 0.2                         | 0.2                         |
-
-Both models use LayerNorm and a feed-forward output head. Default training settings:
-
-- AdamW with learning rate `0.001` and weight decay `0.0001`.
-- Batch size `32` and MSE loss on scaled returns.
-- Gradient clipping at `1.0`.
-- Up to `50` epochs, with early stopping patience `7`.
-- Restoration of the weights with the lowest validation loss.
-- Random seed `42`.
-
-The model with the lowest validation loss is selected for default inference. Test metrics do not determine selection.
+Training uses AdamW, learning rate `0.001`, weight decay `0.0001`, batch size `32`, MSE on scaled returns, and gradient clipping at `1.0`. Defaults allow up to 50 epochs with early stopping patience 7 and seed 42. Best validation weights are restored, and validation loss selects the default model.
 
 ## Latest Results
 
@@ -111,7 +90,9 @@ LSTM was selected by validation loss and reduced overall test RMSE by approximat
 
 Earlier notebook metrics came from a different experiment and a flawed data snapshot. They are superseded by these corrected-data results. Monte Carlo Dropout estimates from the earlier version are not part of the current modular pipeline.
 
-## Installation
+## Local Setup
+
+Run commands from the repository root. The verified Windows development environment uses Python 3.13.
 
 ```bash
 git clone https://github.com/AinurAliWl/sp500_prediction_DL.git
@@ -119,170 +100,113 @@ cd sp500_prediction_DL
 python -m venv .venv
 ```
 
-Activate the environment in Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Or in Windows Command Prompt:
+Activate in Windows Command Prompt:
 
 ```bat
 .venv\Scripts\activate.bat
 ```
 
-Or on Linux / macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Install dependencies:
+For PowerShell, use `.\.venv\Scripts\Activate.ps1`; for Linux or macOS, use `source .venv/bin/activate`.
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-## Usage
+`requirements.txt` contains the full development dependencies and currently has no version pins. `requirements-api.txt` pins the serving dependencies used by Docker. The Dockerfile installs CPU-only PyTorch separately. A full development dependency lock is future work.
 
-Run commands from the repository root.
+## Training, Evaluation and Prediction
 
-### 1. Download Data
+The corrected CSV is included in Git. To reproduce the documented snapshot, use that file. Downloading again may produce different values because source data can be revised.
+
+Optional data download:
 
 ```bash
 python download_data.py
 ```
 
-The downloader writes `data/fred_economic_data.csv`, saves the unfilled source table as `data/fred_economic_data_raw.csv`, and preserves an existing processed CSV as a backup if no backup exists yet. Downloading requires internet access. Source revisions can change a newly downloaded snapshot.
+This saves the processed CSV, an unfilled source CSV, and a backup of an existing processed CSV if no backup exists.
 
-### 2. Train
+Train both models and save their artifacts:
 
 ```bash
 python -m src.train --output-dir models/returns_mlflow_v1
 ```
 
-For a one-epoch smoke check, use a separate directory:
-
-```bash
-python -m src.train --epochs 1 --output-dir models/mlflow_smoke_test
-```
-
-### 3. Evaluate
+Evaluate the saved test arrays and compare both models with Naive:
 
 ```bash
 python -m src.evaluate --artifacts models/returns_mlflow_v1
 ```
 
-Evaluation logs metrics to the corresponding MLflow runs, prints overall and per-horizon metrics, and saves `metrics_overall.csv` and `metrics_by_horizon.csv` in the artifact directory.
-
-### 4. Predict
+Generate the latest forecast:
 
 ```bash
 python -m src.predict --artifacts models/returns_mlflow_v1
 ```
 
-To select a model explicitly:
+Select Transformer explicitly:
 
 ```bash
 python -m src.predict --artifacts models/returns_mlflow_v1 --model transformer
 ```
 
-The JSON output contains the model name, last observation date, last index value, five predicted returns, and five reconstructed index values. With this snapshot, forecasts start from **December 29, 2023**, not the current date.
+Always provide these artifact paths explicitly: current CLI defaults and the modular notebook still use `models/returns_v1`, while the API defaults to `models/returns_mlflow_v1`. Training into an existing directory overwrites its artifacts. Use a new output directory when preserving an experiment.
 
-Pass the corrected run's artifact directory explicitly: the current CLI defaults still point to `models/returns_v1`.
+## MLflow Tracking
 
-## Experiment Tracking with MLflow
+Training creates separate LSTM and Transformer runs in the `sp500-returns` experiment. It records model parameters, per-epoch losses, best validation loss and epoch, completed epochs, and a SHA-256 hash of the input CSV. Artifacts include weights, scalers, configuration, history, and source code.
 
-Each training invocation creates separate LSTM and Transformer runs in the `sp500-returns` experiment. Runs record parameters, per-epoch training and validation losses, best validation loss, best epoch, and the number of completed epochs.
+Evaluation adds overall and per-horizon test metrics, baseline metrics, and result tables to the corresponding training runs. Runs created before MLflow integration have no stored run IDs and are evaluated locally without tracking.
 
-Saved artifacts include model weights, both scalers, configuration, training history, and the training script. The configuration stores the MLflow run IDs and a SHA-256 hash of the input CSV.
-
-Evaluation adds test metrics and CSV tables to the original training runs without retraining or creating new runs.
-
-### Open the Tracking UI
-
-Run from the repository root:
+Open the optional tracking UI:
 
 ```bash
 mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000 --workers 1
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000) and select `sp500-returns`. Keep the UI terminal running and use a second terminal for training and evaluation. The single-worker setting is used for compatibility with the current Windows environment.
+Visit [http://127.0.0.1:5000](http://127.0.0.1:5000).
 
-### Compare Runs
+Useful metrics include `best_val_loss`, `test_rmse`, `test_mae`, `test_mape`, `test_r2`, `test_day_1_rmse` through `test_day_5_rmse`, and `test_rmse_improvement_pct`.
 
-| Metric                                          | Meaning                                                                |
-| ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `best_val_loss`                               | Validation loss used for model selection                               |
-| `test_mae`, `test_rmse`                     | Overall errors in index points                                         |
-| `test_mape`                                   | Overall percentage error                                               |
-| `test_r2`                                     | Overall R²                                                            |
-| `test_day_1_rmse` through `test_day_5_rmse` | RMSE by forecast horizon                                               |
-| `naive_test_rmse`                             | Persistence baseline RMSE                                              |
-| `test_rmse_improvement_pct`                   | RMSE reduction relative to Naive; positive values indicate improvement |
+The local database is `mlflow.db`, and artifacts are in `mlartifacts/`. Both are ignored by Git. Artifact locations use absolute paths from the training machine; moving the project does not automatically update those paths.
 
-Both model and baseline metrics are also recorded by horizon. Result tables are available under **Artifacts → evaluation**, and the model bundle is under **Artifacts → inference**.
+Each MLflow run stores only its own model weights. The shared configuration may select LSTM even in a Transformer bundle. Explicitly select Transformer when using that downloaded bundle. Full evaluation requires both weights and the saved test arrays from the local training directory.
 
-Repeated training creates new records even when run names repeat. Metadata is stored in `mlflow.db`, and MLflow artifacts are stored in `mlartifacts/`; both are excluded from Git. Keep them locally to retain experiment history. Artifact directories created before MLflow integration have no run IDs, so their evaluation saves local tables without logging to MLflow.
+## FastAPI Service
 
-## Model Serving with FastAPI
+The API loads the selected model and scalers once at startup. Requests do not train models or download data.
 
-The API loads the validation-selected model and its scalers from `models/returns_mlflow_v1` once at startup. Requests do not retrain the model or download data.
-
-Model artifacts are excluded from Git. After cloning, run training first or supply an existing compatible artifact bundle before starting the API.
-
-### Start the API
+Model artifacts are ignored by Git. After cloning, train first or provide a compatible bundle before starting the service.
 
 ```bash
 python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-| Endpoint      | Method | Purpose                                                      |
-| ------------- | ------ | ------------------------------------------------------------ |
-| `/health`   | GET    | Check service status and model loading                       |
-| `/metadata` | GET    | Get model name, input dimensions, feature order, and horizon |
-| `/predict`  | POST   | Generate five predicted returns and index values             |
-| `/docs`     | GET    | Open interactive API documentation                           |
+| Endpoint      | Method | Purpose                                            |
+| ------------- | ------ | -------------------------------------------------- |
+| `/health`   | GET    | Service status and model loading                   |
+| `/metadata` | GET    | Input dimensions, feature order, model and horizon |
+| `/predict`  | POST   | Five returns and reconstructed index values        |
+| `/docs`     | GET    | Interactive documentation                          |
 
-Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
-
-### Create and Send an Example Request
+Generate an example request locally:
 
 ```bash
 python -m api.create_example
 ```
 
-This writes `examples/predict_request.json` from the latest valid observations in the local CSV. In `/docs`, expand **POST /predict**, select **Try it out**, paste the JSON file contents into **Request body**, and select **Execute**.
+Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Expand **POST /predict**, click **Try it out**, paste the contents of `examples/predict_request.json` into **Request body**, and click **Execute**.
 
-The request contains:
+The request supplies an observation date, a positive last price, the exact saved feature order, and 60 rows of 19 **unscaled engineered features**. The API applies the saved scaler. The example generator computes these inputs from the local CSV using the project's feature logic.
 
-- `as_of`: date of the last input observation.
-- `last_price`: positive S&P 500 value at that observation.
-- `feature_columns`: feature names in exactly the saved order.
-- `features`: 60 chronological rows with 19 unscaled engineered features per row.
+Invalid dimensions, feature order, numeric values, or unexpected fields are rejected with HTTP 422. The caller is responsible for matching the supplied date and last price to the input history; the API echoes the date and does not validate historical chronology.
 
-The API applies the saved feature scaler itself. Do not send already scaled features or the six raw indicators. The caller is responsible for computing features with the project's feature logic and supplying a matching last price and observation date. The example generator does this using `src/features.py`.
-
-Requests with invalid dimensions, feature order, numeric values, or fields are rejected with HTTP `422`.
-
-### Verified Response
-
-The local API returned HTTP `200` for the generated request, with predictions matching command-line inference:
+The verified LSTM request returned HTTP 200 and these index values:
 
 ```json
 {
-  "model": "lstm",
   "as_of": "2023-12-29",
   "last_price": 4769.83,
-  "horizon": 5,
-  "horizon_unit": "retained_trading_observations",
-  "predicted_returns": [
-    0.0006346516311168671,
-    0.0005061982083134353,
-    0.0003281015087850392,
-    0.00023867588606663048,
-    0.0005311177228577435
-  ],
   "predicted_index": [
     4772.857269234657,
     4775.273284820318,
@@ -293,34 +217,15 @@ The local API returned HTTP `200` for the generated request, with predictions ma
 }
 ```
 
-The response echoes the supplied observation date. It does not assign calendar dates to future horizons.
+This is an excerpt; the full response also contains the model name, horizon, horizon unit, and predicted returns. Tiny floating-point differences may occur across environments.
 
-To use another artifact directory or model, set `SP500_ARTIFACT_DIR` or `SP500_MODEL` before starting the server. Relative artifact paths are resolved from the project root. `SP500_MODEL` supports `lstm` and `transformer`.
+Set `SP500_ARTIFACT_DIR` to use another bundle and `SP500_MODEL` to select `lstm` or `transformer`. Relative artifact paths are resolved from the project root.
 
-## Automated Tests
+## Docker
 
-Run from the repository root:
+**Docker serving is implemented and verified.** The local container reached `healthy`, and POST `/predict` returned HTTP 200 with the expected forecast.
 
-```bash
-python -m pytest -q
-```
-
-**Latest local result: 29 tests passed.** The successful run emitted dependency and Transformer optimization warnings, but no test failures.
-
-The suite checks:
-
-- Health and metadata endpoints for both architectures.
-- Serialization, loading, scaling, and API predictions against the original in-memory model.
-- Index reconstruction by compounding predicted returns.
-- Repeatable inference with dropout disabled.
-- Rejection of malformed requests with HTTP `422`.
-- Target windows staying within chronological partitions.
-- Feature and target scalers fitted on training data only.
-- Target scaling round trips.
-
-Tests create temporary untrained models and deterministic synthetic data. They do not modify trained artifacts, require downloads, or need a running Uvicorn or MLflow server. These checks validate pipeline behavior, not forecasting accuracy.
-
-## Saved Artifacts
+Start Docker Desktop with Linux containers on Windows. Before building, ensure these files exist locally:
 
 ```text
 models/returns_mlflow_v1/
@@ -328,76 +233,81 @@ models/returns_mlflow_v1/
 ├── transformer.pt
 ├── feature_scaler.joblib
 ├── target_scaler.joblib
-├── config.json                  # Includes MLflow run IDs
-├── history.json
-├── test_data.npz
-├── metrics_overall.csv
-└── metrics_by_horizon.csv
+└── config.json
 ```
 
-Weights, scalers, feature order, and configuration must come from the same training run. Evaluation uses the test arrays saved during training. Training into an existing directory overwrites its artifacts; use a new directory to preserve another experiment.
+Build from the repository root:
 
-## Project Structure
+```bash
+docker build -t sp500-api:local .
+```
+
+The image uses Python 3.13, CPU-only PyTorch, pinned serving dependencies, a non-root user, and an HTTP health check. The `.dockerignore` includes only serving code, dependencies, and the required inference bundle.
+
+Stop any local API already using port 8000, then run:
+
+```bash
+docker run --rm --name sp500-api -p 127.0.0.1:8000:8000 sp500-api:local
+```
+
+Open [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Use the same example request described above.
+
+In a second terminal, check status, inspect logs, or stop the container:
+
+```bash
+docker ps
+docker logs sp500-api
+docker stop sp500-api
+```
+
+The verified status is `Up ... (healthy)`, with `127.0.0.1:8000->8000/tcp`. With `--rm`, stopping removes the container; the image remains available.
+
+Docker does not require the local MLflow UI or local Uvicorn server. Weights and scalers are copied into the image at build time, so rebuild after changing the bundle. A fresh clone has no model artifacts and requires training or an existing bundle before this Docker build can succeed.
+
+## Tests
+
+```bash
+python -m pytest -q
+```
+
+**29 tests passed** in the verified runs. Dependency deprecation and Transformer optimization warnings were emitted without failures.
+
+Tests cover both model architectures, artifact serialization and loading, scaling, prediction consistency, return compounding, repeatable inference, invalid API requests, chronological target partitions, and train-only scaler fitting.
+
+They use temporary untrained models and deterministic synthetic data. They do not require downloads, trained production artifacts, or running API and MLflow servers. They verify software behavior; forecasting quality is assessed separately against the baseline.
+
+## Repository Structure
 
 ```text
 sp500_prediction_DL/
-├── api/
-│   ├── __init__.py
-│   ├── main.py
-│   └── create_example.py
-├── tests/
-│   ├── conftest.py
-│   ├── test_api.py
-│   └── test_data.py
-├── examples/
-│   └── predict_request.json
-├── data/
-│   └── fred_economic_data.csv
-├── models/
-├── prediction/
-│   ├── model.ipynb
-│   └── modular_experiment.ipynb
-├── src/
-│   ├── __init__.py
-│   ├── data_loader.py
-│   ├── features.py
-│   ├── data_preparation.py
-│   ├── models.py
-│   ├── train.py
-│   ├── evaluate.py
-│   └── predict.py
-├── pytest.ini
+├── api/                       # FastAPI service and example generator
+├── src/                       # Data, features, models, training and inference
+├── tests/                     # API and preprocessing tests
+├── examples/predict_request.json
+├── data/fred_economic_data.csv
+├── prediction/                # Exploratory and modular notebooks
+├── models/                    # Local training artifacts; ignored by Git
 ├── download_data.py
-├── requirements.txt
+├── requirements.txt           # Development dependencies
+├── requirements-api.txt       # Docker serving dependencies
+├── Dockerfile
+├── .dockerignore
 ├── .gitignore
+├── pytest.ini
 ├── README.md
 └── LICENSE
 ```
 
-Python modules implement the working pipeline. Notebooks remain available for exploration and analysis; the original notebook also contains historical experiments.
+A complete local training directory additionally contains `history.json`, `test_data.npz`, `metrics_overall.csv`, and `metrics_by_horizon.csv`. Weights, scalers, feature order, and configuration must come from the same training run.
 
-## Roadmap
+## Next Steps and Limitations
 
-Completed stages and the next planned steps:
+A GitHub Actions workflow is configured to run automated tests on pushes and pull requests to main. Its first GitHub run is pending verification. Automated Docker build checks and deployment are not configured yet.
 
-1. **Completed — MLflow:** track training parameters, losses, evaluation metrics, and inference artifacts.
-2. **Completed — FastAPI:** serve the saved model through `/health`, `/metadata`, and `/predict`, with input validation and interactive documentation.
-3. **Completed — pytest:** verify preprocessing, artifact loading, inference, and API behavior; 29 tests pass locally.
-4. **Docker:** package the API and its inference artifacts in a runnable container.
-5. **GitHub Actions:** automatically run tests and build the Docker image on pushes and pull requests.
-6. **Documentation:** add verified API examples and setup instructions as each stage is implemented.
+Further model evaluation should include multiple seeds and walk-forward validation. The current improvement over persistence is small, overlapping forecast errors are not independent, and high R² on index levels does not establish strong predictive performance.
 
-Automated deployment is a possible later stage. Tests and Docker builds constitute CI, not CD.
-
-## Limitations and Further Evaluation
-
-- Results describe one seed and one chronological test period. Multi-seed experiments and walk-forward validation remain future work.
-- The small improvement over persistence requires further evaluation. High R² on index levels should be interpreted alongside the baseline.
-- Forecast windows overlap, so pooled errors are not independent observations.
-- Forward filling prevents future-value backfilling, but macroeconomic observation dates and revised values do not represent information available at the time. Strict historical evaluation requires publication-aware, vintage data.
-- The pipeline does not evaluate trading profitability or transaction costs.
-- MLflow, FastAPI, and Uvicorn are pinned to `3.17.0`, `0.142.2`, and `0.54.0`. A complete dependency lock and cross-platform validation remain future work.
+Forward filling avoids future-value backfilling, but revised macroeconomic values and observation dates are not a publication-aware historical dataset. Strict historical evaluation requires vintage data and release timing. Trading profitability and transaction costs are not evaluated.
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](LICENSE).
+MIT License. See [LICENSE](LICENSE).
