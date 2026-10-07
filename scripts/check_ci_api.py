@@ -1,6 +1,7 @@
 """Check both container architectures through the published HTTP API."""
 import argparse
 import json
+import http.client
 import math
 from pathlib import Path
 import time
@@ -20,7 +21,7 @@ def main():
                 health = json.load(response)
             assert health == {"status": "ok", "model_loaded": True, "model": args.model}, health
             break
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
             if time.monotonic() >= deadline:
                 raise RuntimeError("Container API did not become ready within 90 seconds.")
             time.sleep(2)
