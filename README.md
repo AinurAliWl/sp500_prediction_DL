@@ -1,8 +1,9 @@
+
 # S&P 500 Forecasting — LSTM, Transformer & MLOps
 
 A modular PyTorch project that forecasts the S&P 500 over five future trading observations using market and macroeconomic data from FRED.
 
-The project compares LSTM and Transformer models against a persistence baseline. The next goal is to extend the working training and inference pipeline with experiment tracking, model serving, containerization, and continuous integration.
+The project compares LSTM and Transformer models against a persistence baseline. The next goal is to extend the working training and inference pipeline with model serving, containerization, and continuous integration. Experiment tracking is implemented with MLflow.
 
 ## Current Status
 
@@ -16,8 +17,11 @@ Implemented:
 - Overall and per-horizon evaluation against a Naive baseline.
 - Saving and loading model weights, scalers, and configuration.
 - Command-line inference from saved artifacts.
+- MLflow tracking of training parameters, per-epoch losses, and best validation results.
+- Logging model weights, scalers, configuration, and training history as MLflow artifacts.
+- Logging overall and per-horizon test metrics, Naive baseline metrics, and evaluation tables to the corresponding training runs.
 
-MLflow, FastAPI, Docker, automated tests, and GitHub Actions are planned and are not implemented yet.
+FastAPI, Docker, automated tests, and GitHub Actions are planned and are not implemented yet.
 
 ## How It Works
 
@@ -34,14 +38,14 @@ The Naive baseline predicts the last observed index value at every horizon, equi
 
 The current corrected snapshot contains **1,509 observations**, from **January 2, 2018 to December 29, 2023**.
 
-| Indicator | Description |
-|---|---|
-| `SP500` | S&P 500 index |
-| `NASDAQCOM` | NASDAQ Composite index |
-| `DGS10` | 10-year Treasury yield |
-| `UNRATE` | Unemployment rate |
-| `CPIAUCSL` | Consumer Price Index |
-| `DCOILWTICO` | WTI crude oil price |
+| Indicator      | Description            |
+| -------------- | ---------------------- |
+| `SP500`      | S&P 500 index          |
+| `NASDAQCOM`  | NASDAQ Composite index |
+| `DGS10`      | 10-year Treasury yield |
+| `UNRATE`     | Unemployment rate      |
+| `CPIAUCSL`   | Consumer Price Index   |
+| `DCOILWTICO` | WTI crude oil price    |
 
 Dates are sorted before forward-filling missing indicator values. Only dates with an observed S&P 500 value are retained, and remaining incomplete rows are removed. The downloader does not backfill from future observations.
 
@@ -49,25 +53,25 @@ The 19 engineered features include indicator percentage changes, S&P 500 moving-
 
 The feature table is partitioned chronologically at approximately 70% / 15% / 15%. Each target window stays within its partition; input windows may use earlier historical context. Feature and target scalers are fitted on training data only.
 
-| Partition | Input shape |
-|---|---|
-| Train | `(950, 60, 19)` |
+| Partition  | Input shape       |
+| ---------- | ----------------- |
+| Train      | `(950, 60, 19)` |
 | Validation | `(213, 60, 19)` |
-| Test | `(214, 60, 19)` |
+| Test       | `(214, 60, 19)` |
 
 These sizes describe the current snapshot and default settings.
 
 ## Models and Training
 
-| Setting | LSTM | Transformer |
-|---|---|---|
-| Architecture | 2-layer unidirectional LSTM | 2-layer Transformer encoder |
-| Hidden dimension | 64 | 64 |
-| Attention heads | — | 4 |
-| Sequence representation | Last LSTM output | Last encoder token |
-| Positional representation | — | Learned embeddings |
-| Output | 5 returns | 5 returns |
-| Dropout | 0.2 | 0.2 |
+| Setting                   | LSTM                        | Transformer                 |
+| ------------------------- | --------------------------- | --------------------------- |
+| Architecture              | 2-layer unidirectional LSTM | 2-layer Transformer encoder |
+| Hidden dimension          | 64                          | 64                          |
+| Attention heads           | —                          | 4                           |
+| Sequence representation   | Last LSTM output            | Last encoder token          |
+| Positional representation | —                          | Learned embeddings          |
+| Output                    | 5 returns                   | 5 returns                   |
+| Dropout                   | 0.2                         | 0.2                         |
 
 Both models use LayerNorm and a feed-forward output head. Default training settings:
 
@@ -82,23 +86,23 @@ The model with the lowest validation loss is selected for default inference. Tes
 
 ## Latest Results
 
-Results from the corrected-data run in `models/returns_clean_v1`, using default training settings. Metrics are calculated on reconstructed index values and pooled across all five horizons. MAE and RMSE are in index points; MAPE is a percentage.
+Results from the corrected-data run in `models/returns_mlflow_v1`, using default training settings. These match the earlier corrected-data run and are logged in MLflow. Metrics are calculated on reconstructed index values and pooled across all five horizons. MAE and RMSE are in index points; MAPE is a percentage.
 
-| Model | MAE | RMSE | MAPE (%) | R² |
-|---|---:|---:|---:|---:|
-| Naive | 46.6754 | 60.7450 | 1.0861 | 0.9192 |
+| Model          |               MAE |              RMSE |         MAPE (%) |              R² |
+| -------------- | ----------------: | ----------------: | ---------------: | ---------------: |
+| Naive          |           46.6754 |           60.7450 |           1.0861 |           0.9192 |
 | **LSTM** | **45.9707** | **60.1573** | **1.0711** | **0.9208** |
-| Transformer | 46.0685 | 60.3751 | 1.0726 | 0.9202 |
+| Transformer    |           46.0685 |           60.3751 |           1.0726 |           0.9202 |
 
 ### RMSE by Horizon
 
-| Horizon | Naive | LSTM | Transformer |
-|---|---:|---:|---:|
-| 1 | 33.9100 | **33.7987** | 34.0281 |
-| 2 | 49.4342 | **49.1652** | 49.5732 |
-| 3 | 60.8408 | **60.3145** | 61.0316 |
-| 4 | 70.2853 | 69.5690 | **69.4541** |
-| 5 | 78.8323 | **77.8282** | 77.8566 |
+| Horizon |   Naive |              LSTM |       Transformer |
+| ------- | ------: | ----------------: | ----------------: |
+| 1       | 33.9100 | **33.7987** |           34.0281 |
+| 2       | 49.4342 | **49.1652** |           49.5732 |
+| 3       | 60.8408 | **60.3145** |           61.0316 |
+| 4       | 70.2853 |           69.5690 | **69.4541** |
+| 5       | 78.8323 | **77.8282** |           77.8566 |
 
 LSTM was selected by validation loss and reduced overall test RMSE by approximately **0.97%** relative to Naive. This is a modest improvement from one run, not evidence of a robust forecasting advantage. Both models reached their best validation loss in the first epoch and stopped after epoch 8.
 
@@ -151,48 +155,82 @@ The downloader writes `data/fred_economic_data.csv`, saves the unfilled source t
 ### 2. Train
 
 ```bash
-python -m src.train --output-dir models/returns_clean_v1
+python -m src.train --output-dir models/returns_mlflow_v1
 ```
 
 For a one-epoch smoke check, use a separate directory:
 
 ```bash
-python -m src.train --epochs 1 --output-dir models/smoke_test
+python -m src.train --epochs 1 --output-dir models/mlflow_smoke_test
 ```
 
 ### 3. Evaluate
 
 ```bash
-python -m src.evaluate --artifacts models/returns_clean_v1
+python -m src.evaluate --artifacts models/returns_mlflow_v1
 ```
 
-Evaluation prints overall and per-horizon metrics and saves `metrics_overall.csv` and `metrics_by_horizon.csv` in the artifact directory.
+Evaluation logs metrics to the corresponding MLflow runs, prints overall and per-horizon metrics, and saves `metrics_overall.csv` and `metrics_by_horizon.csv` in the artifact directory.
 
 ### 4. Predict
 
 ```bash
-python -m src.predict --artifacts models/returns_clean_v1
+python -m src.predict --artifacts models/returns_mlflow_v1
 ```
 
 To select a model explicitly:
 
 ```bash
-python -m src.predict --artifacts models/returns_clean_v1 --model transformer
+python -m src.predict --artifacts models/returns_mlflow_v1 --model transformer
 ```
 
 The JSON output contains the model name, last observation date, last index value, five predicted returns, and five reconstructed index values. With this snapshot, forecasts start from **December 29, 2023**, not the current date.
 
 Pass the corrected run's artifact directory explicitly: the current CLI defaults still point to `models/returns_v1`.
 
+## Experiment Tracking with MLflow
+
+Each training invocation creates separate LSTM and Transformer runs in the `sp500-returns` experiment. Runs record parameters, per-epoch training and validation losses, best validation loss, best epoch, and the number of completed epochs.
+
+Saved artifacts include model weights, both scalers, configuration, training history, and the training script. The configuration stores the MLflow run IDs and a SHA-256 hash of the input CSV.
+
+Evaluation adds test metrics and CSV tables to the original training runs without retraining or creating new runs.
+
+### Open the Tracking UI
+
+Run from the repository root:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000 --workers 1
+```
+
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000) and select `sp500-returns`. Keep the UI terminal running and use a second terminal for training and evaluation. The single-worker setting is used for compatibility with the current Windows environment.
+
+### Compare Runs
+
+| Metric                                          | Meaning                                                                |
+| ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `best_val_loss`                               | Validation loss used for model selection                               |
+| `test_mae`, `test_rmse`                     | Overall errors in index points                                         |
+| `test_mape`                                   | Overall percentage error                                               |
+| `test_r2`                                     | Overall R²                                                            |
+| `test_day_1_rmse` through `test_day_5_rmse` | RMSE by forecast horizon                                               |
+| `naive_test_rmse`                             | Persistence baseline RMSE                                              |
+| `test_rmse_improvement_pct`                   | RMSE reduction relative to Naive; positive values indicate improvement |
+
+Both model and baseline metrics are also recorded by horizon. Result tables are available under **Artifacts → evaluation**, and the model bundle is under **Artifacts → inference**.
+
+Repeated training creates new records even when run names repeat. Metadata is stored in `mlflow.db`, and MLflow artifacts are stored in `mlartifacts/`; both are excluded from Git. Keep them locally to retain experiment history. Artifact directories created before MLflow integration have no run IDs, so their evaluation saves local tables without logging to MLflow.
+
 ## Saved Artifacts
 
 ```text
-models/returns_clean_v1/
+models/returns_mlflow_v1/
 ├── lstm.pt
 ├── transformer.pt
 ├── feature_scaler.joblib
 ├── target_scaler.joblib
-├── config.json
+├── config.json                  # Includes MLflow run IDs
 ├── history.json
 ├── test_data.npz
 ├── metrics_overall.csv
@@ -233,7 +271,7 @@ Python modules implement the working pipeline. Notebooks remain available for ex
 
 The next stages extend the existing project in this order:
 
-1. **MLflow:** log training parameters, losses, evaluation metrics, and inference artifacts.
+1. **Completed — MLflow:** track training parameters, losses, evaluation metrics, and inference artifacts.
 2. **FastAPI:** serve the saved model through `/health` and `/predict`, with input validation.
 3. **pytest:** test preprocessing, artifact loading, inference, and API behavior.
 4. **Docker:** package the API and its inference artifacts in a runnable container.
@@ -249,7 +287,7 @@ Automated deployment is a possible later stage. Tests and Docker builds constitu
 - Forecast windows overlap, so pooled errors are not independent observations.
 - Forward filling prevents future-value backfilling, but macroeconomic observation dates and revised values do not represent information available at the time. Strict historical evaluation requires publication-aware, vintage data.
 - The pipeline does not evaluate trading profitability or transaction costs.
-- Dependency versions are not yet pinned; environment reproducibility remains a task for the MLOps upgrade.
+- MLflow is pinned to `3.17.0`; the remaining dependency versions are not yet pinned; environment reproducibility remains a task for the MLOps upgrade.
 
 ## License
 

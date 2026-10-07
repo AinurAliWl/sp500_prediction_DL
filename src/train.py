@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import mlflow
 import json
 import random
 from pathlib import Path
@@ -124,6 +126,9 @@ def train_model(
             val_loss
         )
 
+        if mlflow.active_run() is not None:
+            mlflow.log_metrics({"train_loss": train_loss, "val_loss": val_loss}, step=epoch)
+
         print(
             f"{name} | "
             f"Epoch {epoch:02d} | "
@@ -196,18 +201,51 @@ def run_training(data_path=DEFAULT_DATA_PATH, output_dir=None, epochs=50,
                             "horizon": horizon, "lookback": lookback},
         },
     }
-    histories, best_losses = {}, {}
+    tracking_uri = "sqlite:///" + (PROJECT_ROOT / "mlflow.db").as_posix()
+    mlflow.set_tracking_uri(tracking_uri)
+    experiment_name = "sp500-returns"
+    if mlflow.get_experiment_by_name(experiment_name) is None:
+        mlflow.create_experiment(
+            experiment_name,
+            artifact_location=(PROJECT_ROOT / "mlartifacts").as_uri(),
+        )
+    mlflow.set_experiment(experiment_name)
+    config["mlflow_tracking_uri"] = tracking_uri
+    config["data_sha256"] = hashlib.sha256(Path(data_path).read_bytes()).hexdigest()
+    histories, best_losses, run_ids = {}, {}, {}
     # Preserve the notebook's RNG order: initialize/train LSTM first,
     # then initialize/train Transformer.
     for name, cls in (("lstm", LSTMModel), ("transformer", TransformerModel)):
-        model = cls(**config["models"][name])
-        model, history, best_loss = train_model(
-            model, train_loader, val_loader, name, device,
-            epochs, patience, learning_rate)
-        torch.save({k: v.cpu() for k, v in model.state_dict().items()},
-                   output_dir / f"{name}.pt")
-        histories[name] = history
-        best_losses[name] = best_loss
+        with mlflow.start_run(run_name=f"{name}-seed-{seed}") as run:
+            run_ids[name] = run.info.run_id
+            mlflow.log_params({
+                "model": name, "seed": seed, "lookback": lookback,
+                "horizon": horizon, "batch_size": batch_size,
+                "learning_rate": learning_rate, "weight_decay": 1e-4,
+                "max_epochs": epochs, "patience": patience,
+                "train_ratio": 0.70, "val_ratio": 0.15,
+                "device": str(device), "loss": "scaled_return_mse",
+                **config["models"][name],
+                **{f"{split}_samples": len(data[split]["X"])
+                   for split in ("train", "val", "test")},
+            })
+            mlflow.set_tags({"data_sha256": config["data_sha256"],
+                             "stage": "training"})
+            model = cls(**config["models"][name])
+            model, history, best_loss = train_model(
+                model, train_loader, val_loader, name, device,
+                epochs, patience, learning_rate)
+            torch.save({k: v.cpu() for k, v in model.state_dict().items()},
+                       output_dir / f"{name}.pt")
+            histories[name] = history
+            best_losses[name] = best_loss
+            mlflow.log_metrics({
+                "best_val_loss": best_loss,
+                "best_epoch": int(np.argmin(history["val"])) + 1,
+                "epochs_completed": len(history["val"]),
+            })
+            print(f"MLflow run ({name}): {run.info.run_id}")
+    config["mlflow_run_ids"] = run_ids
     config["best_val_losses"] = best_losses
     config["selected_model"] = min(best_losses, key=best_losses.get)
     joblib.dump(data["feature_scaler"], output_dir / "feature_scaler.joblib")
@@ -221,6 +259,15 @@ def run_training(data_path=DEFAULT_DATA_PATH, output_dir=None, epochs=50,
         target_dates=np.array([
             data["df"].index[i:i+horizon].astype(str).tolist()
             for i in test["target_indices"]]))
+    # Upload each model's inference bundle after the final configuration is saved.
+    for name, run_id in run_ids.items():
+        with mlflow.start_run(run_id=run_id):
+            mlflow.set_tag("selected_for_inference", str(name == config["selected_model"]))
+            for filename in (f"{name}.pt", "feature_scaler.joblib",
+                             "target_scaler.joblib", "config.json"):
+                mlflow.log_artifact(str(output_dir / filename), artifact_path="inference")
+            mlflow.log_dict(histories[name], "training/history.json")
+            mlflow.log_artifact(__file__, artifact_path="source")
     print(f"Artifacts: {output_dir}")
     print(f'Validation-selected model: {config["selected_model"]}')
     return output_dir
