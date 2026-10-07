@@ -18,7 +18,7 @@ The goal is to build a reproducible workflow from historical market data to a ru
 | Automated tests                               | 29 passed                                                     |
 | Docker serving                                | Implemented; healthy container and HTTP 200 forecast verified |
 | GitHub Actions tests                          | Implemented and verified                                      |
-| Docker checks in CI                           | Prepared; extended run not yet verified                       |
+| Docker checks in CI                           | Implemented and verified                       |
 
 ## Forecasting Task
 
@@ -281,7 +281,7 @@ They use temporary untrained models and deterministic synthetic data. They do no
 
 The workflow is defined in `.github/workflows/ci.yml` and runs on pushes and pull requests to `main`. It can also be started manually from the GitHub Actions page.
 
-The original automated test workflow completed successfully. The extended workflow adds Docker checks; its first successful GitHub run has not yet been confirmed.
+The extended GitHub Actions workflow completed successfully, including automated tests, Docker image building, and container health and prediction checks for both LSTM and Transformer.
 
 ### What the Extended Workflow Checks
 
@@ -297,7 +297,7 @@ CI uses `scripts/create_ci_bundle.py` and `scripts/check_ci_api.py`. Temporary m
 
 **Do not run the CI bundle generator in your local trained-artifact directory.** It refuses to overwrite a nonempty directory. Your existing trained models remain the bundle used for local Docker serving.
 
-After pushing the workflow and scripts, open [GitHub Actions](https://github.com/AinurAliWl/sp500_prediction_DL/actions), select the latest **Python tests** run, and inspect **Build Docker image** and **Check both models in Docker**. Mark Docker CI as verified only after those steps complete successfully.
+Workflow results and logs are available in [GitHub Actions](https://github.com/AinurAliWl/sp500_prediction_DL/actions), including the Docker build and container checks.
 
 ## Repository Structure
 
@@ -329,9 +329,9 @@ A complete local training directory additionally contains `history.json`, `test_
 
 ## Next Steps and Limitations
 
-Automated tests have passed in GitHub Actions. Docker build and container checks are included in the prepared extended workflow; verification of its GitHub run is pending. Automated deployment is not configured.
+The current MLOps workflow is implemented and verified: MLflow tracking, FastAPI serving, automated tests, Docker containerization, and GitHub Actions checks. Automated deployment is not configured.
 
-The next engineering step is to confirm the extended workflow passes and keep its result visible in GitHub Actions. Model research and deployment can then be pursued separately.
+Further work can focus on model evaluation and reproducibility. Deployment is an optional future stage.
 
 Further model evaluation should include multiple seeds and walk-forward validation. The current improvement over persistence is small, overlapping forecast errors are not independent, and high R² on index levels does not establish strong predictive performance.
 
