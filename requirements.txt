@@ -9,3 +9,7 @@ jupyter
 pandas-datareader
 tqdm
 mlflow
+fastapi
+uvicorn
+pytest
+httpx

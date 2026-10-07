@@ -3,7 +3,7 @@
 
 A modular PyTorch project that forecasts the S&P 500 over five future trading observations using market and macroeconomic data from FRED.
 
-The project compares LSTM and Transformer models against a persistence baseline. The next goal is to extend the working training and inference pipeline with model serving, containerization, and continuous integration. Experiment tracking is implemented with MLflow.
+The project compares LSTM and Transformer models against a persistence baseline. Experiment tracking with MLflow, model serving with FastAPI, and automated checks with pytest are implemented. The next goal is to add containerization and continuous integration.
 
 ## Current Status
 
@@ -20,8 +20,11 @@ Implemented:
 - MLflow tracking of training parameters, per-epoch losses, and best validation results.
 - Logging model weights, scalers, configuration, and training history as MLflow artifacts.
 - Logging overall and per-horizon test metrics, Naive baseline metrics, and evaluation tables to the corresponding training runs.
+- FastAPI endpoints for health checks, input metadata, and five-horizon forecasts.
+- Input validation and loading the selected model once at startup.
+- Automated tests for both architectures, API inference, invalid inputs, chronological partitions, and scalers.
 
-FastAPI, Docker, automated tests, and GitHub Actions are planned and are not implemented yet.
+Docker and GitHub Actions are planned and are not implemented yet.
 
 ## How It Works
 
@@ -222,6 +225,101 @@ Both model and baseline metrics are also recorded by horizon. Result tables are 
 
 Repeated training creates new records even when run names repeat. Metadata is stored in `mlflow.db`, and MLflow artifacts are stored in `mlartifacts/`; both are excluded from Git. Keep them locally to retain experiment history. Artifact directories created before MLflow integration have no run IDs, so their evaluation saves local tables without logging to MLflow.
 
+## Model Serving with FastAPI
+
+The API loads the validation-selected model and its scalers from `models/returns_mlflow_v1` once at startup. Requests do not retrain the model or download data.
+
+Model artifacts are excluded from Git. After cloning, run training first or supply an existing compatible artifact bundle before starting the API.
+
+### Start the API
+
+```bash
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+| Endpoint      | Method | Purpose                                                      |
+| ------------- | ------ | ------------------------------------------------------------ |
+| `/health`   | GET    | Check service status and model loading                       |
+| `/metadata` | GET    | Get model name, input dimensions, feature order, and horizon |
+| `/predict`  | POST   | Generate five predicted returns and index values             |
+| `/docs`     | GET    | Open interactive API documentation                           |
+
+Open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+### Create and Send an Example Request
+
+```bash
+python -m api.create_example
+```
+
+This writes `examples/predict_request.json` from the latest valid observations in the local CSV. In `/docs`, expand **POST /predict**, select **Try it out**, paste the JSON file contents into **Request body**, and select **Execute**.
+
+The request contains:
+
+- `as_of`: date of the last input observation.
+- `last_price`: positive S&P 500 value at that observation.
+- `feature_columns`: feature names in exactly the saved order.
+- `features`: 60 chronological rows with 19 unscaled engineered features per row.
+
+The API applies the saved feature scaler itself. Do not send already scaled features or the six raw indicators. The caller is responsible for computing features with the project's feature logic and supplying a matching last price and observation date. The example generator does this using `src/features.py`.
+
+Requests with invalid dimensions, feature order, numeric values, or fields are rejected with HTTP `422`.
+
+### Verified Response
+
+The local API returned HTTP `200` for the generated request, with predictions matching command-line inference:
+
+```json
+{
+  "model": "lstm",
+  "as_of": "2023-12-29",
+  "last_price": 4769.83,
+  "horizon": 5,
+  "horizon_unit": "retained_trading_observations",
+  "predicted_returns": [
+    0.0006346516311168671,
+    0.0005061982083134353,
+    0.0003281015087850392,
+    0.00023867588606663048,
+    0.0005311177228577435
+  ],
+  "predicted_index": [
+    4772.857269234657,
+    4775.273284820318,
+    4776.839799985885,
+    4777.979859117269,
+    4780.517556824684
+  ]
+}
+```
+
+The response echoes the supplied observation date. It does not assign calendar dates to future horizons.
+
+To use another artifact directory or model, set `SP500_ARTIFACT_DIR` or `SP500_MODEL` before starting the server. Relative artifact paths are resolved from the project root. `SP500_MODEL` supports `lstm` and `transformer`.
+
+## Automated Tests
+
+Run from the repository root:
+
+```bash
+python -m pytest -q
+```
+
+**Latest local result: 29 tests passed.** The successful run emitted dependency and Transformer optimization warnings, but no test failures.
+
+The suite checks:
+
+- Health and metadata endpoints for both architectures.
+- Serialization, loading, scaling, and API predictions against the original in-memory model.
+- Index reconstruction by compounding predicted returns.
+- Repeatable inference with dropout disabled.
+- Rejection of malformed requests with HTTP `422`.
+- Target windows staying within chronological partitions.
+- Feature and target scalers fitted on training data only.
+- Target scaling round trips.
+
+Tests create temporary untrained models and deterministic synthetic data. They do not modify trained artifacts, require downloads, or need a running Uvicorn or MLflow server. These checks validate pipeline behavior, not forecasting accuracy.
+
 ## Saved Artifacts
 
 ```text
@@ -243,6 +341,16 @@ Weights, scalers, feature order, and configuration must come from the same train
 
 ```text
 sp500_prediction_DL/
+├── api/
+│   ├── __init__.py
+│   ├── main.py
+│   └── create_example.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_api.py
+│   └── test_data.py
+├── examples/
+│   └── predict_request.json
 ├── data/
 │   └── fred_economic_data.csv
 ├── models/
@@ -258,6 +366,7 @@ sp500_prediction_DL/
 │   ├── train.py
 │   ├── evaluate.py
 │   └── predict.py
+├── pytest.ini
 ├── download_data.py
 ├── requirements.txt
 ├── .gitignore
@@ -269,11 +378,11 @@ Python modules implement the working pipeline. Notebooks remain available for ex
 
 ## Roadmap
 
-The next stages extend the existing project in this order:
+Completed stages and the next planned steps:
 
 1. **Completed — MLflow:** track training parameters, losses, evaluation metrics, and inference artifacts.
-2. **FastAPI:** serve the saved model through `/health` and `/predict`, with input validation.
-3. **pytest:** test preprocessing, artifact loading, inference, and API behavior.
+2. **Completed — FastAPI:** serve the saved model through `/health`, `/metadata`, and `/predict`, with input validation and interactive documentation.
+3. **Completed — pytest:** verify preprocessing, artifact loading, inference, and API behavior; 29 tests pass locally.
 4. **Docker:** package the API and its inference artifacts in a runnable container.
 5. **GitHub Actions:** automatically run tests and build the Docker image on pushes and pull requests.
 6. **Documentation:** add verified API examples and setup instructions as each stage is implemented.
@@ -287,7 +396,7 @@ Automated deployment is a possible later stage. Tests and Docker builds constitu
 - Forecast windows overlap, so pooled errors are not independent observations.
 - Forward filling prevents future-value backfilling, but macroeconomic observation dates and revised values do not represent information available at the time. Strict historical evaluation requires publication-aware, vintage data.
 - The pipeline does not evaluate trading profitability or transaction costs.
-- MLflow is pinned to `3.17.0`; the remaining dependency versions are not yet pinned; environment reproducibility remains a task for the MLOps upgrade.
+- MLflow, FastAPI, and Uvicorn are pinned to `3.17.0`, `0.142.2`, and `0.54.0`. A complete dependency lock and cross-platform validation remain future work.
 
 ## License
 
